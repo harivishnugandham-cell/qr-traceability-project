@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Provenance Tracker</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f4f7f6;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+        }
+        h1 {
+            color: #007bff;
+            text-align: center;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .stage {
+            border-left: 3px solid #ccc;
+            padding-left: 20px;
+            margin-bottom: 20px;
+            position: relative;
+        }
+        .stage-header {
+            font-weight: bold;
+            font-size: 1.2em;
+            color: #28a745;
+            margin-bottom: 5px;
+        }
+        .stage::before {
+            content: '•';
+            position: absolute;
+            left: -10px;
+            top: 0;
+            font-size: 20px;
+            color: #007bff;
+            background: #fff;
+            padding: 0 5px;
+        }
+        .data-item {
+            margin-bottom: 4px;
+        }
+        .data-label {
+            font-weight: 600;
+            color: #555;
+        }
+        #error-message {
+            color: red;
+            text-align: center;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📦 Supply Chain Journey</h1>
+        <p id="product-info">Loading details...</p>
+        <div id="journey-timeline">
+            </div>
+        <p id="error-message" style="display: none;"></p>
+    </div>
+<script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const params = new URLSearchParams(window.location.search);
+            const productId = params.get('id');
+            const timeline = document.getElementById('journey-timeline');
+            const errorElement = document.getElementById('error-message');
+            const productInfo = document.getElementById('product-info');
+            
+            // 1. Check for Product ID
+            if (!productId) {
+                errorElement.textContent = 'Error: No Product ID found in the scan link.';
+                errorElement.style.display = 'block';
+                productInfo.textContent = '';
+                return;
+            }
+
+            productInfo.innerHTML = `**Product ID:** ${productId}`;
+
+            // 2. Fetch data from your local API
+            // *** THIS LINE HAS BEEN UPDATED TO USE 127.0.0.1 ***
+            const API_URL = `http://127.0.0.1:3000/api/track?id=${productId}`; 
+
+            fetch(API_URL)
+                .then(response => {
+                    // Check if response is not 2xx, throw error if so
+                    if (!response.ok) {
+                        // Attempt to parse JSON error message from the API
+                        return response.json().then(data => { 
+                            throw new Error(data.error || `HTTP Status ${response.status} failed.`); 
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const journey = data.journey;
+                    
+                    if (!journey) {
+                        throw new Error('No journey data received.');
+                    }
+
+                    // 3. Render the journey stages
+                    productInfo.innerHTML = `
+                        **Product Type:** ${journey.ProductType} | 
+                        **Batch ID:** ${journey.BatchID}
+                    `;
+                    
+                    timeline.innerHTML = ''; // Clear loading text
+
+                    // --- Farmer Stage ---
+                    if (journey.DateHarvested) {
+                        timeline.innerHTML += `
+                            <div class="stage">
+                                <div class="stage-header">🌱 1. Farmer/Producer</div>
+                                <div class="data-item"><span class="data-label">Harvest Date:</span> ${new Date(journey.DateHarvested).toDateString()}</div>
+                                <div class="data-item"><span class="data-label">Location (Lat/Lon):</span> ${journey.FarmerLat}, ${journey.FarmerLon}</div>
+                                <div class="data-item"><span class="data-label">Initial Cost:</span> $${journey.InitialCost}</div>
+                            </div>
+                        `;
+                    } else {
+                        timeline.innerHTML += `<div class="stage">Farmer data pending...</div>`;
+                    }
+
+                    // --- Distributor Stage ---
+                    if (journey.DateShipped) {
+                        timeline.innerHTML += `
+                            <div class="stage">
+                                <div class="stage-header">🚚 2. Distributor/Logistics</div>
+                                <div class="data-item"><span class="data-label">Ship Date:</span> ${new Date(journey.DateShipped).toDateString()}</div>
+                                <div class="data-item"><span class="data-label">Location:</span> ${journey.DistributorLocation}</div>
+                                <div class="data-item"><span class="data-label">Distribution Cost:</span> $${journey.DistributionCost}</div>
+                            </div>
+                        `;
+                    } else {
+                        timeline.innerHTML += `<div class="stage">Distributor data pending...</div>`;
+                    }
+
+                    // --- Retailer Stage ---
+                    if (journey.DateSold) {
+                        timeline.innerHTML += `
+                            <div class="stage">
+                                <div class="stage-header">🛒 3. Retailer/Point of Sale</div>
+                                <div class="data-item"><span class="data-label">Sale Date:</span> ${new Date(journey.DateSold).toDateString()}</div>
+                                <div class="data-item"><span class="data-label">Store:</span> ${journey.Store_Name}</div>
+                                <div class="data-item"><span class="data-label">Final Price:</span> $${journey.FinalPrice}</div>
+                            </div>
+                        `;
+                    } else {
+                        timeline.innerHTML += `<div class="stage">Retailer data pending...</div>`;
+                    }
+
+                })
+                .catch(error => {
+                    console.error('Fetch Error:', error);
+                    errorElement.textContent = `Could not load product journey: ${error.message}`;
+                    errorElement.style.display = 'block';
+                    productInfo.textContent = '';
+                    timeline.innerHTML = '';
+                });
+        });
+    </script>
+</body>
+</html>
