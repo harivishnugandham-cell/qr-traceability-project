@@ -1,16 +1,16 @@
-// server.js
+// server.js (UPDATED FOR POSTGRESQL)
 
 const express = require('express');
-const mysql = require('mysql2');
+const { Pool } = require('pg'); // <-- 1. Changed from 'mysql2' to 'pg'
 require('dotenv').config();
-const cors = require('cors'); // <--- ADDED: Import the CORS package
+const cors = require('cors'); 
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+// NOTE: For Render, the PORT environment variable is automatically provided.
+const PORT = process.env.PORT || 3000; 
 
-// Enable CORS for all origins. This allows your frontend (port 5500) 
-// to fetch data from your backend API (port 3000).
-app.use(cors()); // <--- ADDED: Use the CORS middleware
+// Enable CORS for all origins.
+app.use(cors());
 
 // Middleware to parse JSON bodies
 app.use(express.json());
@@ -18,24 +18,23 @@ app.use(express.json());
 // ----------------------------------------------------
 // Database Connection Pool (using the .env file)
 // ----------------------------------------------------
-const pool = mysql.createPool({
-    host: process.env.DB_HOST,
+const pool = new Pool({ // <-- 2. Changed from mysql.createPool to pg.Pool
     user: process.env.DB_USER,
+    host: process.env.DB_HOST,
+    database: process.env.DB_NAME || 'product_trace', // Use DB_NAME for schema
     password: process.env.DB_PASSWORD,
-    database: 'product_trace', // The schema you created in Workbench
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-}).promise(); // Use promise wrapper for async/await
+    port: process.env.DB_PORT,
+    ssl: { rejectUnauthorized: false } // Required for external connections like Render
+});
 
 
 // ----------------------------------------------------
 // DATABASE CONNECTION TEST & SERVER STARTUP
 // ----------------------------------------------------
-pool.getConnection()
-    .then(connection => {
+pool.connect()
+    .then(client => { // <-- Changed from pool.getConnection()
         console.log("Database connection successful!");
-        connection.release(); // Release the connection immediately
+        client.release(); // Release the connection immediately
 
         // Start listening ONLY after a successful connection test
         app.listen(PORT, () => {
@@ -45,8 +44,7 @@ pool.getConnection()
     .catch(err => {
         console.error("!!! FATAL: DATABASE CONNECTION FAILED !!!");
         console.error("Error details:", err.message);
-        console.error("Please check your .env file password and ensure MySQL server is running.");
-        // Exit the process so the application doesn't run without a database
+        console.error("Please check your .env file password and ensure the public database is running.");
         process.exit(1); 
     });
 
@@ -71,29 +69,29 @@ app.get('/api/track', async (req, res) => {
     }
 
     try {
-        // Query joins all four tables (Products, Farmer, Distributor, Retailer)
+        // Query joins all four tables (Note: Uses $1 placeholder)
         const query = `
             SELECT 
                 P.ProductID, P.ProductType, P.BatchID,
-                F.DateHarvested, F.Location_Lat AS FarmerLat, F.Location_Lon AS FarmerLon, F.InitialCost,
-                D.DateShipped, D.Location_Address AS DistributorLocation, D.DistributionCost,
+                F.DateHarvested, F.Location_Lat AS "farmerLat", F.Location_Lon AS "farmerLon", F.InitialCost,
+                D.DateShipped, D.Location_Address AS "distributorLocation", D.DistributionCost,
                 R.DateSold, R.Store_Name, R.FinalPrice
             FROM Products P
             LEFT JOIN FarmerLog F ON P.ProductID = F.ProductID
             LEFT JOIN DistributorLog D ON P.ProductID = D.ProductID
             LEFT JOIN RetailerLog R ON P.ProductID = R.ProductID
-            WHERE P.ProductID = ?;
+            WHERE P.ProductID = $1; 
         `;
         
-        const [rows] = await pool.execute(query, [productId]); 
+        const result = await pool.query(query, [productId]); // <-- Changed from pool.execute to pool.query
 
-        if (rows.length === 0) {
+        if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Product journey not found.' });
         }
 
         res.json({
             message: "Supply Chain Journey Retrieved",
-            journey: rows[0] // Returns the combined row of data
+            journey: result.rows[0] // <-- PostgreSQL returns results in a 'rows' array
         });
 
     } catch (error) {
@@ -113,11 +111,12 @@ app.post('/api/product/init', async (req, res) => {
     const ProductID = `PID-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     try {
+        // Uses $1, $2, $3 placeholders
         const productInsertQuery = `
             INSERT INTO Products (ProductID, ProductType, BatchID) 
-            VALUES (?, ?, ?);
+            VALUES ($1, $2, $3); 
         `;
-        await pool.execute(productInsertQuery, [ProductID, ProductType, BatchID]);
+        await pool.query(productInsertQuery, [ProductID, ProductType, BatchID]); // <-- pool.query
         
         res.status(201).json({ 
             message: 'Product initialized successfully. Use this ID for logs and QR code.',
@@ -141,11 +140,12 @@ app.post('/api/log/farmer', async (req, res) => {
     }
 
     try {
+        // Uses $1, $2, $3, $4, $5 placeholders
         const query = `
             INSERT INTO FarmerLog (ProductID, DateHarvested, Location_Lat, Location_Lon, InitialCost) 
-            VALUES (?, ?, ?, ?, ?);
+            VALUES ($1, $2, $3, $4, $5); 
         `;
-        await pool.execute(query, [ProductID, DateHarvested, Location_Lat, Location_Lon, InitialCost]);
+        await pool.query(query, [ProductID, DateHarvested, Location_Lat, Location_Lon, InitialCost]); // <-- pool.query
 
         res.status(201).json({ message: 'Farmer log recorded successfully.' });
     } catch (error) {
@@ -165,11 +165,12 @@ app.post('/api/log/distributor', async (req, res) => {
     }
 
     try {
+        // Uses $1, $2, $3, $4 placeholders
         const query = `
             INSERT INTO DistributorLog (ProductID, Location_Address, DateShipped, DistributionCost) 
-            VALUES (?, ?, ?, ?);
+            VALUES ($1, $2, $3, $4); 
         `;
-        await pool.execute(query, [ProductID, Location_Address, DateShipped, DistributionCost]);
+        await pool.query(query, [ProductID, Location_Address, DateShipped, DistributionCost]); // <-- pool.query
 
         res.status(201).json({ message: 'Distributor log recorded successfully.' });
     } catch (error) {
@@ -189,11 +190,12 @@ app.post('/api/log/retailer', async (req, res) => {
     }
 
     try {
+        // Uses $1, $2, $3, $4 placeholders
         const query = `
             INSERT INTO RetailerLog (ProductID, Store_Name, DateSold, FinalPrice) 
-            VALUES (?, ?, ?, ?);
+            VALUES ($1, $2, $3, $4); 
         `;
-        await pool.execute(query, [ProductID, Store_Name, DateSold, FinalPrice]);
+        await pool.query(query, [ProductID, Store_Name, DateSold, FinalPrice]); // <-- pool.query
 
         res.status(201).json({ message: 'Retailer log recorded successfully.' });
     } catch (error) {
