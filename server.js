@@ -55,7 +55,7 @@ pool.connect()
 
 // Simple test route to confirm server is running
 app.get('/', (req, res) => {
-    res.send('Traceability API Server Running! V1');
+    res.send('Traceability API Server Running! FINAL');
 });
 
 // ----------------------------------------------------
